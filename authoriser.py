@@ -1,4 +1,5 @@
-# it intakes a customer for the input, can use this for example: d96e0382-8e88-4092-a4c1-0b4c179d06c2
+# this includes the authoriser lambda
+
 import base64
 import json
 from typing import List, Dict, Any
