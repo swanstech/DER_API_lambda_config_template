@@ -1,108 +1,116 @@
-import os
+# it intakes a customer for the input, can use this for example: d96e0382-8e88-4092-a4c1-0b4c179d06c2
+import base64
 import json
-import boto3
-import psycopg2
-import psycopg2.extras
+from typing import List, Dict, Any
 
-secrets_client = boto3.client("secretsmanager")
 
-def get_db_secret():
-    secret_arn = os.environ["DB_SECRET_ARN"]
-    resp = secrets_client.get_secret_value(SecretId=secret_arn)
-    return json.loads(resp["SecretString"])
+def b64url_decode(data: str) -> bytes:
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(data + padding)
 
-def get_connection():
-    s = get_db_secret()
-    return psycopg2.connect(
-        host=s["host"],
-        port=int(s.get("port", 5432)),
-        dbname=s["dbname"],
-        user=s["user"],
-        password=s["password"],
-        connect_timeout=5,
-        sslmode="require",
-        cursor_factory=psycopg2.extras.RealDictCursor
-    )
 
-def lambda_handler(event, context):
+def decode_jwt_no_verify(token: str) -> Dict[str, Any]:
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError("Invalid JWT format")
+
+    payload_b64 = parts[1]
+    payload = json.loads(b64url_decode(payload_b64))
+    return payload
+
+
+def extract_roles(payload: dict) -> List[str]:
+    roles = set()
+
+    # Realm roles (Keycloak standard)
+    realm_roles = payload.get("realm_access", {}).get("roles", [])
+    roles.update(realm_roles)
+
+    return sorted(roles)
+
+
+def generate_policy(principal_id: str, effect: str, resource: str, context: dict = None) -> dict:
+    policy = {
+        "principalId": principal_id,
+        "policyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Action": "execute-api:Invoke",
+                "Effect": effect,
+                "Resource": resource
+            }]
+        }
+    }
+
+    # API Gateway requires ALL context values to be strings
+    if context:
+        policy["context"] = {k: "" if v is None else str(
+            v) for k, v in context.items()}
+
+    return policy
+
+
+def lambda_handler(event, _context):
+    """
+    REST API Lambda Authorizer (TOKEN)
+    Enforces: role must include 'General Manager'
+    """
     try:
-        params = event.get("queryStringParameters") or {}
-        customer_id = params.get("customer_id")
+        auth = event.get("authorizationToken")
+        if auth.startswith("Bearer "):
+            token = auth[len("Bearer "):].strip()
+        else:
+            token = auth.strip()
 
-        if not customer_id:
-            return {
-                "statusCode": 400,
-                "headers": {"Content-Type": "application/json"},
-                "body": json.dumps({"message": "customer_id is required"}, default=str),
-            }
+        if not token:
+            return generate_policy("anonymous", "Deny", event["methodArn"])
 
-        conn = get_connection()
-        cur = conn.cursor()
+        payload = decode_jwt_no_verify(token)
 
-        # 1) All customer_test_results rows for this customer_id
-        # (customer_id is only in customer_test_request, so we join via test_id)
-        cur.execute(
-            """
-            SELECT
-                r.result_id,
-                r.test_id,
-                r.asset_id,
-                r.risk_id,
-                r.recommendation_id,
-                r.updated_date
-            FROM customer_test_results r
-            JOIN customer_test_request req
-              ON req.test_id = r.test_id
-            WHERE req.customer_id = %s
-            ORDER BY r.updated_date DESC
-            """,
-            (customer_id,),
-        )
-        results_rows = cur.fetchall()
+        # Extract roles
+        roles = extract_roles(payload)
 
-        # 2) Risk details only for risks referenced by this customer's results
-        cur.execute(
-            """
-            SELECT DISTINCT
-                d.risk_id,
-                d.risk_probability,
-                d.risk_impact,
-                d.risk_treatment_options,
-                d.updated_date
-            FROM customer_test_risk_details d
-            JOIN customer_test_results r
-              ON r.risk_id = d.risk_id
-            JOIN customer_test_request req
-              ON req.test_id = r.test_id
-            WHERE req.customer_id = %s
-            ORDER BY d.updated_date DESC
-            """,
-            (customer_id,),
-        )
-        risk_rows = cur.fetchall()
+        # DENY if role 'General Manager' is NOT present
+        if "General Manager" not in roles:
+            return generate_policy(
+                principal_id="unauthorized",
+                effect="Deny",
+                resource=event["methodArn"]
+            )
 
-        cur.close()
-        conn.close()
-
-        return {
-            "statusCode": 200,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps(
-                {
-                    "customer_id": customer_id,
-                    "customer_test_results": results_rows,
-                    "customer_test_risk_details": risk_rows,
-                },
-                default=str,
-            ),
+        # Extract user info (same as your local decoder)
+        user_info = {
+            "name": payload.get("name"),
+            "preferred_username": payload.get("preferred_username"),
+            "given_name": payload.get("given_name"),
+            "family_name": payload.get("family_name"),
+            "email": payload.get("email"),
         }
 
-    except Exception as e:
-        return {
-            "statusCode": 500,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps(
-                {"message": "Failed to fetch data", "error": str(e)},
-                default=str,
-            ),
+        context_out = {
+            **user_info,
+            "roles": ",".join(roles)
         }
+
+        principal = (
+            payload.get("preferred_username")
+            or payload.get("email")
+            or payload.get("sub")
+            or "user"
+        )
+
+        # ALLOW only General Manager
+        return generate_policy(
+            principal_id=principal,
+            effect="Allow",
+            resource=event["methodArn"],
+            context=context_out
+        )
+
+    except Exception:
+        # Any error => deny
+        return generate_policy(
+            principal_id="unauthorized",
+            effect="Deny",
+            resource=event.get("methodArn", "*")
+        )
