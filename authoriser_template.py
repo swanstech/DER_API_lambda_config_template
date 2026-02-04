@@ -1,4 +1,6 @@
-# this includes the authoriser lambda
+# this includes the authoriser lambda which suits the authorsation for the project at the moment.
+# Please only change the role based user access control when you would like to reuse the code for other lambdas
+# please find the code snippet for user access in line 77
 
 import base64
 import json
@@ -71,8 +73,9 @@ def lambda_handler(event, _context):
         # Extract roles
         roles = extract_roles(payload)
 
-        # DENY if role 'General Manager' is NOT present
-        if "General Manager" not in roles:
+        # DENY if role does not match the requirement. Please put the role required for this api in the next line "".
+        # Like if "General Manager" not in roles
+        if "" not in roles:
             return generate_policy(
                 principal_id="unauthorized",
                 effect="Deny",
