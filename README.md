@@ -13,9 +13,8 @@ The project is consist of a lambda function for the API, an authoriser template,
    And for more information about how does the authoriser work, please then refer to the documantation in the team folder
    
 3.  db_seeding.py: It is only used for seeding the databsed for the above lambda function, as this api is using mock data for showcase purpose.
-4. token_decoder.py: it is a Python file to show how does the token to be decoded in the authoriser.
-   
-                      This authoriser is not using Keyclock JWT decoder for this time, but just the general decoding logic.
+4. token_decoder.py: It is a Python file to show how does the token to be decoded in the authoriser.
+                      But this authoriser is not using Keyclock JWT decoder for this time, but just the general decoding logic.
 
 # Use case
 This repo is used for developers not familiar with AWS serverless API building, providing lambda examples both for api building and authoriers setup.
