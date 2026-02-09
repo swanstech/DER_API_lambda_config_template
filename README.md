@@ -16,6 +16,8 @@ The project is consist of a lambda function for the API, an authoriser template,
 4. token_decoder.py: It is a Python file to show how does the token to be decoded in the authoriser.
                       But this authoriser is not using Keyclock JWT decoder for this time, but just the general decoding logic.
 
+5. test_conn.py and secrets_conn_policies.json: they are providing code and details for the API setup instructions.
+
 # Use case
 This repo is used for developers not familiar with AWS serverless API building, providing lambda examples both for api building and authoriers setup.
 But the authoriser templated can be used for all later API authorisation by just changing the role required for the new scenario
