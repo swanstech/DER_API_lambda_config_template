@@ -75,7 +75,7 @@ def lambda_handler(event, _context):
 
         # DENY if role does not match the requirement. Please put the role required for this api in the next line "".
         # Like if "General Manager" not in roles
-        if "" not in roles:
+        if "General Manager" not in roles:
             return generate_policy(
                 principal_id="unauthorized",
                 effect="Deny",
